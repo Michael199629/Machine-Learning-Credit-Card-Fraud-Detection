@@ -1,0 +1,874 @@
+---
+title: "ALY6040 Final Assignment"
+author: "Yi Yuan"
+date: "10/21/2020"
+output: 
+  pdf_document: 
+    fig_height: 6
+    fig_width: 7
+    latex_engine: xelatex
+---
+
+# Introduction  
+
+More transactions were transformed into e-bill today, kinds of frauds come up which lead great loss for banks. If banks can have an intelligence system to detect frauds, which is helpful to protect financial systems. Our group use Kaggle website to find this dataset to do EDA exercise. The dataset contains a lot of credit card transactions, the most of it is normal but exist some fraudulent transactions. The frauds will cause great damage to the bank. All the data in the dataset is real, features V1, V2, …, V28 are the principal components obtained with PCA. Bank could cancel fraud transactions immediately or send verity massage to customers, make sure the transactions is safe. What’s more, the frauds account will be banned immediately, officer could invest it and arrest the criminals. 
+
+First, we do some descriptive analysis. Variables in PCA format is convenience for us to do analysis. After that we found that fraud transactions are relatively small probability activity. We did balance the proportion and figure out the most related variable to fraud with modeled dataset. After that we tried use ordinary linear regression and logistic regression models to build the credit card fraud detection model. Finally, we used decision trees, Random Forests, and Gradient Boosting Machine models with the classification algorithm to predict which transactions are likely to be fraudulent.
+    
+# Analysis
+
+## **Exploratory Data Analysis**
+    
+First, we import the data, and do some descriptive analysis.
+  
+```{r, warning=FALSE, message=FALSE}
+require(ggplot2)
+require(dplyr)
+require(data.table)
+require(gridExtra)
+require(corrplot)
+################
+#import data
+#############
+rawData <- read.csv("creditcard.csv") 
+#################
+#describe data
+######################
+str(rawData)
+```
+    
+The creditcard dataset has 284807 observations of 31 variables: Time, Amount, Class, and V1, V2, … V28. The feature 'Amount' is the transaction Amount. Feature 'Class' is the response variable and it takes value 1 in case of fraud and 0 otherwise. Feature 'Time' involves the seconds elapsed between each transaction and the first transaction in the dataset. V1, V2, … V28 are the numerical input variables, which are the result of a PCA transformation.
+
+```{r, results="hide"}
+head(rawData)
+```
+
+```{r}
+summary(rawData)
+table(is.na(rawData))
+```
+   
+By using the `table()` and `is.na()` function, we found that there were no NA values for the dataset.
+  
+```{r}
+table(rawData$Class)
+```
+    
+It has 492 frauds out of 284,807 transactions. The positive class (frauds) account for 0.172% of all transactions.
+    
+We found this dataset is very imbalanced. The proportion of non-fraud transaction in the entire dataset is too big. I think before we imply the machine learning algorithm, it is better to balance the proportion of class first.
+
+Here are some histograms of part features when this raw dataset is imbalance:
+
+```{r}
+imbalance <- with(rawData,table(Class))
+ggplot(data = rawData,aes(x = as.factor(Class),
+                          fill = as.factor(Class))) +
+  geom_bar() +
+  ggtitle("Class Distributions \n (0: No Fraud || 1: Fraud)")
+hist(rawData$Time)
+par(mfrow = c(2,2))
+hist(rawData$Amount)
+hist(rawData$V1)
+hist(rawData$V2)
+hist(rawData$V3)
+```
+
+Then we want to balance the dataset:
+
+```{r}
+# make dataset balanced
+fraud <- filter(rawData, rawData$Class == 1)
+nfraud <- filter(rawData, rawData$Class == 0)
+set.seed(1234)
+subfraud1 <- nfraud[sample(nrow(nfraud),size = nrow(fraud)),]
+new_data <- rbind(fraud,subfraud1)
+#Randomization
+random_index <- sample(1:nrow(new_data), nrow(new_data))
+new_data <- new_data[random_index, ]
+```
+
+The new balanced datasets is great and we can do more exploratory data analysis:
+
+```{r}
+# class distrubution in new data
+
+table(new_data$Class)
+par(mfrow = c(1,1))
+ggplot(data = new_data,aes(x = as.factor(Class),fill = as.factor(Class))) +
+  geom_bar() +
+  ggtitle("Class Distributions in new data \n (0: No Fraud || 1: Fraud)")
+```
+
+The plot shows new dataset is balanced. Next, I want to know the proportion of fraud cases in different transaction amount and in different time.
+
+```{r}
+ggplot(new_data, aes(x = Amount, fill = as.factor(Class))) + geom_histogram(bins = 30) + 
+  ggtitle("Histogram of transaction amount") + xlab("Amount")
+ggplot(new_data, aes(x = Time, fill = as.factor(Class))) + geom_histogram(bins = 100) + 
+  ggtitle("Histogram of transaction against time") + xlab("Time")
+```
+
+The correlation between different features is also very important. In this study, we want to focus on detection of fraud. So the correlation coefficient of feature ‘Class’ is important. Here is the heatmap of correlation matrix:
+
+```{r, message = FALSE}
+new_data$Class <- as.numeric(new_data$Class)
+coroldfeatures <- cor(rawData)
+corfeatures <- cor(new_data)
+par(mfrow = c(1,1))
+
+corrplot(coroldfeatures, method = "color", type = "full") + 
+  title("heatmap of imbalance correlation matrix", line = 1.5)
+corrplot(corfeatures, method = "color", type = "full") + 
+  title("heatmap of balanced correlation matrix", line = 1.5)
+par(mfrow = c(1,1))
+```
+
+From the correlation matrix of balanced dataset, we can easily found features “V1”, ”V3”, ”V5”, ”V6”, ”V9”, ”V10”, ”V12”, ”V14”, ”V17”, “V18” are negative correlated to “Class”, and “V2”, “V4”, “V11” are positive correlated to “Class”.
+
+In the end of EDA, we use boxplot to detect the anomaly value of these important features:
+
+```{r}
+g0 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V1, fill = as.factor(Class)))+ 
+  geom_boxplot() + ggtitle("boxplot of V1 grouped by Class") + xlab("Class")
+g1 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V2, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V2 grouped by Class") + xlab("Class")
+g2 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V3, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V3 grouped by Class") + xlab("Class")
+g3 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V4, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V4 grouped by Class") + xlab("Class")
+g4 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V5, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V5 grouped by Class") + xlab("Class")
+g5 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V6, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V6 grouped by Class") + xlab("Class")
+g6 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V7, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V7 grouped by Class") + xlab("Class")
+g7 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V9, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V9 grouped by Class") + xlab("Class")
+g8 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V10, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V10 grouped by Class") + xlab("Class")
+g9 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V11, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V11 grouped by Class") + xlab("Class")
+g10 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V12, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V12 grouped by Class") + xlab("Class")
+g11 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V14, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V14 grouped by Class") + xlab("Class")
+g12 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V16, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V16 grouped by Class") + xlab("Class")
+g13 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V17, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V17 grouped by Class") + xlab("Class")
+g14 <- ggplot(data = new_data, aes(x = as.factor(Class), y = V18, fill = as.factor(Class))) + 
+  geom_boxplot() + ggtitle("boxplot of V18 grouped by Class") + xlab("Class")
+grid.arrange(g0, g1, g2, g3, ncol = 2)
+grid.arrange(g4, g5, g6, g7, ncol = 2)
+grid.arrange(g8, g9, g10,g11,ncol = 2)
+grid.arrange(g12,g13,g14,ncol = 2)
+```
+
+## **Ordinary Linear Regression**
+
+In this model, we perform regression on the Class in the data. By using `lm()` function, we found Class relationship with other variable.
+
+```{r,message=FALSE,warning=FALSE}
+require(car)
+model1 <- lm(Class ~ ., data = new_data)
+summary(model1)
+```
+
+We can see from the summary, the p-value is less than 0.05, and adjusted R squared is 0.6326, which mean this model is not good enough, but the p-value shows this model have has statistical significant.
+
+```{r}
+par(mfrow = c(2,2))
+plot(model1)
+```
+
+In the Residuals vs Fitted figure, the most of it are centrally distribute from (0,0), we can see a red line in the figure, it is the trend of distribution.
+
+In QQ-Normal plot, we can see the points are almost fit the straight line, which means the residuals is approximately normal distribution.
+
+Next, I still remember the EDA project where the `corrplot()` shows there are plenty of multicollinearity in the features. So, I want to use VIF score to eliminate some redundant features.
+
+```{r}
+vif1 <- vif(model1)
+vif1[vif1 == max(vif1)]
+
+model2 <- lm(Class ~ Time + V1 + V2 + V3 + V4 + V5 + V6 +
+               V8 + V9 + V10 + V11 + V12 + V13 + V14 + V15 + 
+               V16 + V17 + V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif2 <- vif(model2)
+vif2[vif2 == max(vif2)]
+
+model3 <- lm(Class ~ Time + V1 + V2 + V3 + V4 + V5 + V6 +
+               V8 + V9 + V10 + V11 + V12 + V13 + V14 + V15 + 
+               V16 + V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif3 <- vif(model3)
+vif3[vif3 == max(vif3)]
+
+model4 <- lm(Class ~ Time + V1 + V2 + V4 + V5 + V6 +
+               V8 + V9 + V10 + V11 + V12 + V13 + V14 + V15 + 
+               V16 + V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif4 <- vif(model4)
+vif4[vif4 == max(vif4)]
+
+model5 <- lm(Class ~ Time + V1 + V2 + V4 + V5 + V6 +
+               V8 + V9 + V10 + V11 + V13 + V14 + V15 + 
+               V16 + V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif5 <- vif(model5)
+vif5[vif5 == max(vif5)]
+
+model6 <- lm(Class ~ Time + V1 + V2 + V4 + V5 + V6 +
+               V8 + V9 + V10 + V11 + V13 + V14 + V15 + 
+               V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif6 <- vif(model6)
+vif6[vif6 == max(vif6)]
+
+model7 <- lm(Class ~ Time + V1 + V2 + V4 + V5 + V6 +
+               V8 + V9 + V11 + V13 + V14 + V15 + 
+               V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif7 <- vif(model7)
+vif7[vif7 == max(vif7)]
+
+model8 <- lm(Class ~ Time + V1 + V4 + V5 + V6 +
+               V8 + V9 + V11 + V13 + V14 + V15 + 
+               V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif8 <- vif(model8)
+vif8[vif8 == max(vif8)]
+
+model9 <- lm(Class ~ Time + V1 + V4 + V5 + V6 +
+               V8 + V9 + V11 + V13 + V15 + 
+               V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif9 <- vif(model9)
+vif9[vif9 == max(vif9)]
+
+model10 <- lm(Class ~ Time + V1 + V4 + V6 +
+               V8 + V9 + V11 + V13 + V15 + 
+               V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data)
+vif10 <- vif(model10)
+vif10[vif10 == max(vif10)]#VIF value less than 5
+```
+
+I think that to eliminate collinearity variables need to be deleted one by one, because two highly correlated variables may cause their VIF values to be high. One variable’s VIF score bigger than 5 means this variable can be explained 80% by other variables. We repeat the process of variable selection using VIF, and finally get model10.
+
+The max variance-inflation of model 10 is 4.625 which is belonged to “V9” feature. Then I think my model is too complicated. So I use AIC value to applied backward stepwise features selection, and finally bulid my lm model:
+
+```{r,results="hide",warning=FALSE,message=FALSE}
+step(model10,direction = "backward")
+```
+
+```{r}
+model11 <- lm(formula = Class ~ V4 + V6 + V8 + V11 + V13 + V18 + V19 + V20 + 
+                V23 + V25 + V26 + V28 + Amount, data = new_data)
+par(mfrow = c(2,2))
+plot(model11)
+summary(model11)
+```
+
+We can see the R-squared is a little smaller than model10 but the number of features is decrease by 13.
+
+The four figure shows the summary of linear regression with multiple R-squared equals to 0.6438, means that 64.38% of the dependent variable (is canceled) is predicted by the independent variables. The linear model is not good enough but really can be reference. In the down right figure. shows the Q-Q plot, which also prove a bad linear regression model.  Then we give up the Linear regression but focus on Logistic Regression.
+
+## **Logistic Regression**
+
+We use `glm()` function to fit a logistic regression model to detect the fraud.
+The code we used.
+
+
+```{r,message=FALSE,warning=FALSE}
+require(glmnet)
+glmmodel2 <- glm(Class ~., data = new_data, family = "binomial", maxit = 100)
+```
+
+The process of eliminating multicollinearity is the same as before:
+
+```{r,warning=FALSE,message=FALSE}
+vif11 <- vif(glmmodel2)
+vif11[vif11 == max(vif11)]
+
+glmmodel3 <- glm(Class ~ Time + V1 + V2 + V3 + V4 + V5 + V6 +
+               V8 + V9 + V10 + V11 + V12 + V13 + V14 + V15 + 
+               V16 + V18 + V19 + V20 + V21 + V22 + V23 +
+               V24 + V25 + V26 + V27 + V28 + Amount, data = new_data,family = "binomial")
+vif12 <- vif(glmmodel3)
+vif12[vif12 == max(vif12)]
+
+glmmodel4 <- glm(Class ~ Time + V1 + V3 + V4 + V5 + V6 +
+                   V8 + V9 + V10 + V11 + V12 + V13 + V14 + V15 + 
+                   V16 + V18 + V19 + V20 + V21 + V22 + V23 +
+                   V24 + V25 + V26 + V27 + V28 + Amount, data = new_data,family = "binomial")
+vif13 <- vif(glmmodel4)
+vif13[vif13 == max(vif13)]#VIF value is less than 5
+glmmodel4$coefficients[glmmodel4$coefficients == max(glmmodel4$coefficients)]
+```
+
+The same way to apply features selection:
+
+```{r,results = "hide", warning=FALSE, message=FALSE}
+step(glmmodel4,direction = "backward")
+```
+
+```{r,warning=FALSE,message=FALSE}
+glmmodel5 <- glm(formula = Class ~ Time + V3 + V4 + V8 + V12 + V13 + V14 + 
+                   V16 + V20 + V22 + V23 + V24 + V26 + Amount, 
+                 data = new_data,family = "binomial")
+summary(glmmodel5)
+```
+
+Use a feature with a smaller p-value to see the effect of regression.
+
+```{r}
+par(mfrow = c(1,1))
+plot(new_data$V4,glmmodel5$fitted.values)
+```
+
+It looks pretty good.
+
+Then let's check the prediction accuracy of the linear model. In fact, the test data we applied is a bit less rigorous. But in pursuit of simplicity. We directly used rawData as the test set. Here we use `table()` function to generate confusion matrix. The row of table is actual value and the column is predict value.
+
+```{r, warning=FALSE, message=FALSE}
+#require(pROC)
+require(ModelMetrics)
+set.seed(43215)
+subfraud2 <- nfraud[sample(nrow(nfraud),size = nrow(fraud)),]
+new_data.test <- rbind(fraud,subfraud2)
+
+probs <- predict(glmmodel5,newdata = rawData,type = "response")
+lrProbs <- predict(model11,newdata = rawData,type = "response")
+
+pred <- ifelse(probs > 0.5, "1", "0")
+res.lm <- ifelse(lrProbs > 0.5, "1", "0")
+table(rawData$Class,pred)
+table(rawData$Class,res.lm)
+```
+
+Then we calculate the Accuracy, Persicion, Recall and F1 Score.
+
+```{r}
+cm.glm <- as.data.frame(table(rawData$Class,pred))
+cm.lm <- as.data.frame(table(rawData$Class,res.lm))
+
+#Accuracy
+print(paste("The Accuracy of logistic regression model is ",
+            round(100*mean(pred == rawData$Class),digits = 2),
+            "%",sep = ""))
+print(paste("The Accuracy of ordinary linear regression model is ",
+            round(100*mean(res.lm == rawData$Class),digits = 2),
+            "%",sep = ""))
+#Percision
+Percision.glm <- cm.glm$Freq[cm.glm$Var1 ==1 & (cm.glm$Var1 == cm.glm$pred)]/sum(cm.glm$Freq[cm.glm$pred == 1])
+print(paste("The Precision of logistic regression model is ",
+            round(100*Percision.glm,digits = 2),
+            "%",sep = ""))
+
+Percision.lm <- cm.lm$Freq[cm.lm$Var1 ==1 & (cm.lm$Var1 == cm.lm$res.lm)]/sum(cm.lm$Freq[cm.lm$res.lm == 1])
+print(paste("The Precision of ordinary linear regression model is ",
+            round(100*Percision.lm,digits = 2),
+            "%",sep = ""))
+#Recall
+Recall.glm <- cm.glm$Freq[cm.glm$Var1 ==1 & (cm.glm$Var1 == cm.glm$pred)]/sum(cm.glm$Freq[cm.glm$Var1 == 1])
+print(paste("The Recall of logistic regression model is ",
+            round(100*Recall.glm,digits = 2),
+            "%",sep = ""))
+
+Recall.lm <- cm.lm$Freq[cm.lm$Var1 ==1 & (cm.lm$Var1 == cm.lm$res.lm)]/sum(cm.lm$Freq[cm.lm$Var1 == 1])
+print(paste("The Recall of ordinary linear regression model is ",
+            round(100*Recall.lm,digits = 2),
+            "%",sep = ""))
+#F1 score
+F1score.glm <- 2*(Recall.glm*Percision.glm)/(Recall.glm + Percision.glm)
+F1score.lm <- 2*(Recall.lm*Percision.lm)/(Recall.lm + Percision.lm)
+print(paste("The F1 score of logistic regression model is",
+            round(F1score.glm,digits = 2),
+            sep = " "))
+print(paste("The F1 score of ordinary linear regression model is",
+            round(F1score.lm,digits = 2),
+            sep = " "))
+Accuracy.mat <- c()
+F1score.mat <- c()
+Accuracy.mat <- c(mean(pred == rawData$Class),mean(res.lm == rawData$Class))
+F1score.mat <- c(F1score.glm,F1score.lm)
+```
+
+From the result, I found the Precision value is very low. It is because $Precision = TP/(TP + FP)$ and $Recall = TP/(TP + FN)$, in the rawData set which is very imbalanced, so the peridcted value have very high False Negtive Rate.
+
+At the end of the linear model, we want to use regularization to do logistic regression again.
+
+```{r}
+Estmators <- select(new_data,Time, V1, V3 , V4 , V5 , V6 ,
+                      V8 , V9 , V10 , V11 , V12 , V13 , V14 , V15 , 
+                      V16 , V18 , V19 , V20 , V21 , V22 , V23 ,
+                      V24 , V25 , V26 , V27 , V28 , Amount)
+Estmators <- as.matrix(Estmators)
+OptmzLogReg <- glmnet(x=Estmators,y=new_data$Class,family = "binomial",alpha = 1)
+summary(OptmzLogReg)
+plot(OptmzLogReg$beta)
+```
+
+This figure can tell us how the beta value shrunk into zero. I set the alpha value equal to 1 which means lasso regression. When the alpha value equals to 0, that means ridge regression.
+
+Then I want to use `cv.glmnet()` function to do 10 folder cross validation:
+
+```{r}
+Cvmodel <- cv.glmnet(Estmators,new_data$Class,alpha = 1)
+plot(Cvmodel)
+Lambda.1se <- Cvmodel$lambda.1se
+```
+
+This figure visualized how the mean square error changes with lambda. The lambda is the parameter that constrains the number of features in the penalty term. The Lambda between -8 and -6, the mean-squared Error is not change very great. "Lambda.min" is the value of $λ$ that gives minimum mean cross-validated error. While "lambda.1se" is the value which gives the most regularized model such that error is within one standard error of the minimum
+
+Finally, I use the min lambda to optimize the model:
+
+```{r}
+OptmzLogfit <- glmnet(Estmators,new_data$Class, family = "binomial",
+                 alpa = 1,
+                 lambda = Lambda.1se)
+EstBeta <- OptmzLogfit$beta
+EstBeta
+```
+
+From the result we can see the regularization process makes the model much simpler. The number of features has been reduced to 4.
+
+## **Decision Tree Model**
+
+Decision trees are widely used because they are easy to interpret, handle classification features, extend to multi-class classification Settings, do not require feature scaling, and are able to capture nonlinear and feature interactions. Because of these aspects, decision trees generally perform well on rules-based models and are often a good starting point for fraud detection. 
+
+The balanced data after undersampling has all the fraud cases in the original data, in order to prevent the training data from overfitting in the tree model, I divided the balanced data into training set and test set again according to 7/3 ratio.
+
+```{r,message=FALSE,warning=FALSE,results="hide"}
+require(party)
+require(randomForest)
+require(ranger)
+str(new_data$Class)
+set.seed(2020)
+random_index <- sample(1:nrow(new_data), nrow(new_data))
+random_new_data <- new_data[random_index, ]
+ind <- sample(2,nrow(random_new_data),replace = T,prob = c(0.7,0.3))
+tree.train <- random_new_data[ind == 1,]
+tree.test <- random_new_data[ind ==2,]
+```
+
+We will now implement our decision tree model and plot it.
+
+```{r}
+tree.train$Class <- as.factor(tree.train$Class)
+fraud.ctree <- ctree(Class~.,data=tree.train)
+plot(fraud.ctree)
+```
+
+Next, we want to compare the classification accuracy of the training group and the vaild group to see if this model has overfitting.
+ 
+```{r}
+tree.train.pred <- predict(fraud.ctree)
+table(tree.train$Class,tree.train.pred)
+#Accuracy
+print(paste("The Accuracy of training set is",
+            round(100*mean(tree.train.pred == tree.train$Class),digits = 2),
+            "%",sep = " "))
+```
+
+Here is confusion matrix and accuracy of training set
+
+```{r}
+tree.valid <- predict(fraud.ctree, newdata = tree.test)
+table(tree.test$Class,tree.valid)
+print(paste("The Accuracy of valid set is",
+            round(100*mean(tree.valid == tree.test$Class),
+                  digits = 2), "%",sep = " "))
+```
+
+Here is confusion matrix and accuracy of valid set
+
+```{r}
+tree.pred <- predict(fraud.ctree, newdata = rawData)
+table(rawData$Class,tree.pred)
+cm.tree <- as.data.frame(table(tree.pred,rawData$Class))
+print(paste("The Accuracy of Decision tree model is",
+            round(100*mean(tree.pred == rawData$Class),digits = 2),
+            "%",sep = " "))
+Accuracy.mat <- c(Accuracy.mat,mean(tree.pred == rawData$Class))
+```
+
+Here is confusion matrix and accuracy of testing set
+
+```{r}
+print(paste("The F1 score of Decision tree model is",
+            round(f1Score(rawData$Class,tree.pred),digits = 5),
+            sep = " "))
+F1score.mat <- c(F1score.mat,f1Score(rawData$Class,tree.pred))
+```
+
+Here is F1 scores of Decision Tree Model
+
+## **Random Forests Model**
+
+Our goal is to build a model that can predict with high accuracy which transactions are likely to be fraudulent. We construct a random forest model classification algorithm to detect fraudulent transactions. We have partitioned the data and are ready to apply the random forest algorithm to the balanced data. 
+
+```{r}
+new_data$Class <- as.factor(new_data$Class)
+fraud.cforest <- randomForest(Class ~., 
+                              data = new_data, 
+                              ntree = 1000,
+                              importance = TRUE,
+                              proximity = TRUE)
+print(fraud.cforest)
+plot(fraud.cforest)
+legend("topright", inset=.05, title="Error type",
+       c("1","OOB","0"), fill=c("green","black","red"), horiz=TRUE,
+       cex = 0.7)
+```
+
+This figure shows that the Random Forest Model has a small detection error for non-fraud cases. And when the number of trees is about 300, the error is no longer significantly reduced.
+
+```{r}
+which.min(fraud.cforest$err.rate[,1])
+fraud.cforest$err.rate[which.min(fraud.cforest$err.rate[,1])]
+```
+
+Here I found the number of tree where we have the minimum error rate. And it prints the value of the minimum error.
+
+Furthermore, we are continue to using gird-search to tuning parameter for Random Forest Model:
+
+```{r}
+##RF Tuning
+tree.train$Class <- as.factor(tree.train$Class)
+tree.test$Class <- as.factor(tree.test$Class)
+features <- setdiff(names(tree.train), "Class")
+
+set.seed(2020)
+
+RF.tune <- tuneRF(
+  x          = tree.train[features],
+  y          = tree.train$Class,
+  ntreeTry   = 1000,
+  mtryStart  = 5,
+  stepFactor = 1.5,
+  improve    = 0.01,
+  trace      = FALSE      # to not show real-time progress 
+)
+```
+
+Here I showed how the OOB Error change when mtry changes. There are three hyperparameters of random forest that can be used for tuning: mtry, node_size, and sample_size.
+* ntree: number of tree. Using too many tree is uncessarily inefficient.
+* mtry: the number of variables to randomly sample as candidates at each split.
+* nodesize: minimum number of samples within the terminal nodes.
+* sample_size: Ratio of data used for training.
+
+```{r}
+hyper_grid.RF <- expand.grid(
+  mtry       = seq(20, 30, by = 2),
+  node_size  = seq(1, 4, by = 1),
+  sampe_size = c(.55, .632, .70, .80),
+  OOB_error   = 0
+)
+nrow(hyper_grid.RF)
+
+
+for(i in 1:nrow(hyper_grid.RF)) {
+  
+  # train model
+  FR.tune <- ranger(
+    formula         = Class ~ ., 
+    data            = tree.train, 
+    num.trees       = 1000,
+    mtry            = hyper_grid.RF$mtry[i],
+    min.node.size   = hyper_grid.RF$node_size[i],
+    sample.fraction = hyper_grid.RF$sampe_size[i],
+    seed            = 2020
+  )
+  
+  # add OOB error to grid
+  hyper_grid.RF$OOB_error[i] <- FR.tune$prediction.error
+}
+head(hyper_grid.RF[with(hyper_grid.RF, order(hyper_grid.RF$OOB_error)), ],10)
+```
+
+Here we get the smallest OOB_error and the corresponding hyperparameter.
+
+```{r}
+FR.final <- ranger(
+  formula         = Class ~ ., 
+  data            = tree.train, 
+  num.trees       = 1000,
+  mtry            = 22,
+  min.node.size   = 2,
+  sample.fraction = 0.7,
+  seed            = 2020
+)
+
+
+```
+
+Folllowing is confusion matrix and Accuracy, F1 score of using Random Forest to predict testing set.
+
+```{r}
+forest.pred <- predict(FR.final, data = rawData)
+table(rawData$Class,forest.pred$predictions)
+
+print(paste("The Accuracy of Random Forests Model is ",
+            round(100*mean(forest.pred$predictions == rawData$Class),digits = 2), "%",sep = ""))
+
+print(paste("The F1 score of Random Forest model is",
+            round(f1Score(rawData$Class,forest.pred$predictions),digits = 5),
+            sep = " "))
+Accuracy.mat <- c(Accuracy.mat,mean(forest.pred$predictions == rawData$Class))
+F1score.mat <- c(F1score.mat,f1Score(rawData$Class,forest.pred$predictions))
+
+```
+
+## **Gradient Boosting Machine**
+
+As for the gradient boosting machine, it is a kind of sequential boosted ensemble approach. This model is hard to explain the process with more hyperparameters than other two methods. But complicated procedures correcting error in every step therefore this method will have high predictive power. 
+
+```{r,warning=FALSE,message=FALSE}
+require(rsample)
+require(gbm)
+require(caret)
+require(pdp)
+```
+
+```{r}
+new_data <- rbind(fraud,subfraud1)
+fraud.gbm <- gbm(
+  formula = Class ~.,
+  distribution = "bernoulli",
+  data = new_data,
+  n.trees = 10000,
+  interaction.depth = 1,
+  shrinkage = 0.001,
+  cv.folds = 5,
+  n.cores = NULL,
+  verbose = FALSE
+)
+print(fraud.gbm)
+
+min(fraud.gbm$cv.error)
+
+gbm.perf(fraud.gbm, method = "cv")
+```
+
+The feature “Class” is a binary data. So I set the distribution = ”Bernoulli”; interaction.depth equals to 1 means I just want to use the stump tree model to fit the training data at first. Shrinkage is like a step length. Cv.folds equals to 5 mean I use 5 folds cross-validation to get mean “loss”(0.3360). I think the loss function in this task should be Bernoulli deviance. The green line shows below mean the test error and black line mean training error. The test error continues decreasing means we can optimize the parameter to get a better model.
+
+Then we tried to use deeper tree and decrease the number of tree to build another gbm model.
+
+```{r}
+############################################
+#tuning
+###################################################
+
+fraud.gbm2 <- gbm(
+  formula = Class ~.,
+  distribution = "bernoulli",
+  data = new_data,
+  n.trees = 5000,
+  interaction.depth = 3,
+  shrinkage = 0.1,
+  cv.folds = 5,
+  n.cores = NULL,
+  verbose = FALSE
+)
+print(fraud.gbm2)
+
+min(fraud.gbm2$cv.error)
+
+gbm.perf(fraud.gbm2, method = "cv")
+```
+
+We can see when we increase the learning rate and deepen the depth of the tree, the sooner we train the model to reach the best point. However, in order to get more precise parameters, we use grid search to find the optimal parameter.
+
+Then we focus on fails and use grid search for hyper parameter tuning. Use shrinkage as learning rate, depth of trees as complexity of decision trees. Find index for n trees with minimum CV error and then create hyperparameter grid. Then randomize data and grid search. 
+
+```{r}
+#########
+#grid search
+########
+hyper_grid <- expand.grid(
+  shrinkage = c(0.01,0.1,.3),
+  interaction.depth = c(1,3,5),
+  n.minobsinnode = c(5,10,15),
+  bag.fraction = c(.65, .8, 1),
+  optimal_trees = 0,
+  min_valid.error = 0
+)
+
+nrow(hyper_grid)
+set.seed(2020)
+
+random_index <- sample(1:nrow(new_data), nrow(new_data))
+random_new_data <- new_data[random_index, ]
+
+for(i in 1:nrow(hyper_grid)) {
+  
+  set.seed(123)
+  
+  # train model
+  gbm.tune <- gbm(
+    formula = Class ~ .,
+    distribution = "bernoulli",
+    data = random_new_data,
+    n.trees = 5000,
+    interaction.depth = hyper_grid$interaction.depth[i],
+    shrinkage = hyper_grid$shrinkage[i],
+    n.minobsinnode = hyper_grid$n.minobsinnode[i],
+    bag.fraction = hyper_grid$bag.fraction[i],
+    train.fraction = .8,
+    n.cores = NULL, # will use all cores by default
+    verbose = FALSE
+  )
+
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_valid.error[i] <- min(gbm.tune$valid.error)
+}
+
+hyper_grid %>% 
+  dplyr::arrange(min_valid.error) %>%
+  head(10)
+```
+
+Further tuning parameters
+
+```{r}
+hyper_grid <- expand.grid(
+  shrinkage = c(0.1,.2,.3),
+  interaction.depth = c(3,4,5),
+  n.minobsinnode = c(5,8,10),
+  bag.fraction = c(.3, .65,1),
+  optimal_trees = 0,
+  min_valid.error = 0
+)
+
+nrow(hyper_grid)
+
+
+for(i in 1:nrow(hyper_grid)) {
+  
+  set.seed(123)
+  
+  # train model
+  gbm.tune <- gbm(
+    formula = Class ~ .,
+    distribution = "bernoulli",
+    data = random_new_data,
+    n.trees = 5000,
+    interaction.depth = hyper_grid$interaction.depth[i],
+    shrinkage = hyper_grid$shrinkage[i],
+    n.minobsinnode = hyper_grid$n.minobsinnode[i],
+    bag.fraction = hyper_grid$bag.fraction[i],
+    train.fraction = .8,
+    n.cores = NULL, # will use all cores by default
+    verbose = FALSE
+  )
+  hyper_grid$optimal_trees[i] <- which.min(gbm.tune$valid.error)
+  hyper_grid$min_valid.error[i] <- min(gbm.tune$valid.error)
+}
+
+hyper_grid %>% 
+  dplyr::arrange(min_valid.error) %>%
+  head(10)
+```
+
+The model parameter with the smallest error has been found. Let us determine the final gbm model
+
+```{r}
+fraud.gbm.final <- gbm(
+  formula = Class ~ .,
+  distribution = "bernoulli",
+  data = random_new_data,
+  n.trees = 31,
+  interaction.depth = 5,
+  shrinkage = 0.2,
+  n.minobsinnode = 5,
+  bag.fraction = 0.3,
+  train.fraction = 1,
+  n.cores = NULL, # will use all cores by default
+  verbose = FALSE
+)
+print(fraud.gbm.final)
+```
+
+Then we want to see the F1 scores of this model. And the confusion matrix of this model.
+
+```{r}
+gbm.pred <- predict(fraud.gbm.final, n.trees = fraud.gbm.final$n.trees,newdata = rawData,type = "response")
+
+
+gbm.result <- ifelse(gbm.pred >0.7,"1","0")
+
+table(rawData$Class,gbm.result)
+cm.gbm <- as.data.frame(table(rawData$Class,gbm.result))
+mean(gbm.result == rawData$Class)
+print(paste("The Accuracy of GBM is ",
+            round(100*mean(gbm.result == rawData$Class),digits = 2),
+            "%",sep = ""))
+hist(gbm.pred)
+#compare to the non-optimal gbm
+gbm.pred2 <- predict(fraud.gbm2, n.trees = fraud.gbm2$n.trees,newdata = rawData)
+gbm.result2 <- ifelse(gbm.pred2 >0.5,"1","0")
+mean(gbm.result2 == rawData$Class)
+table(rawData$Class,gbm.result2)
+print(paste("The F1 score of Gradient Boosting Machine model is",
+            round(f1Score(rawData$Class,as.numeric(gbm.result)),digits = 5),
+            sep = " "))
+Accuracy.mat <- c(Accuracy.mat,mean(gbm.result == rawData$Class))
+F1score.mat <- c(F1score.mat,f1Score(rawData$Class,as.numeric(gbm.result)))
+```
+
+After that, use modified model to compare with non-optimal model. And visualize them. The accuracy of this model is 96.5%. According to the result of this, we can know that V14 value is the most relevant variables factor in fraud.
+
+```{r,warning=FALSE,message=FALSE}
+require(vip)
+vip(fraud.gbm.final) + ggtitle("The importance of features in fruad detection model(gbm)")
+```
+
+## **ROC Curve and Model selection**
+
+```{r,warning=FALSE,message=FALSE}
+require(pROC)
+par(pty = "s")
+lmroc <- roc(rawData$Class,probs,plot = TRUE,legacy.axes = TRUE,
+    percent = TRUE, xlab= "False Positive Percentage",
+    ylab = "True Positive Percentage",print.auc = TRUE,print.auc.x = 30)
+
+plot.roc(rawData$Class,lrProbs,percent = TRUE, col = "#4daf4a",
+         print.auc = TRUE,add = TRUE,print.auc.x = 30,print.auc.y = 45)
+
+plot.roc(rawData$Class,as.numeric(tree.pred),percent = TRUE, col = "#7222e3",
+         print.auc = TRUE,add = TRUE,print.auc.x = 30,print.auc.y = 55)
+
+plot.roc(rawData$Class,as.numeric(forest.pred$predictions),percent = TRUE, col = "#e3e322",
+         print.auc = TRUE,add = TRUE,print.auc.x = 30,print.auc.y = 60)
+
+plot.roc(rawData$Class,as.numeric(gbm.pred),percent = TRUE, col = "#e60e11",
+         print.auc = TRUE,add = TRUE,print.auc.x = 30,print.auc.y = 65)
+legend(60,10, inset=.05, title="ROC Curve",
+       legend = c("LR","GLM","DT","RF","GBM"),fill = c("green","black","blue","yellow","red"),
+       cex = 0.45,
+       horiz=TRUE)
+Selection <- data.frame(Accuracy.mat,F1score.mat,row.names = c("glm","lm","DT","RF","GBM"))
+print(Selection)
+```
+
+From the figure, we can see that when the AUC is higher, it means that at the same FPR level, the higher the percentage of TP. This shows that this model is better for distinguishing TP and FP. Based on ROC curve, AUC value, accuracy and F1 score, GBM is the best model.
+
+# Conclusion
+
+In this assignment, we applied 5 machine learning algorithms to model and predict credit card fraud data. Through DEA, we found that this is a very unbalanced data set, and we need to balance the data before building a model.
+
+In terms of modeling methods, in addition to understanding the ideas behind the five machine learning algorithms, we also learned how to use full grid-search to tune parameters.
+
+They have their own advantages and disadvantages when making model selection. We should choose based on the characteristics of the data and the actual needs in real life. Common TPR and FPR may actually affect the processing cost of enterprises. For example, when the cost of processing FP and FN is not high, it may be a better choice to increase TPR as much as possible. In this project, due to the imbalance of data, AUC value and F1 score may be a more important selection indicator. So we finally chose Gradient Boosting Machine Model as the most suitable model for this data set.
+
+# Reference
+
+Martinez, J. (2019, July 03). Credit Fraud || Dealing with Imbalanced Datasets. Retrieved October 22, 2020, from https://www.kaggle.com/janiobachmann/credit-fraud-dealing-with-imbalanced-datasets
+
+Random Forests. (n.d.). Retrieved October 22, 2020, from http://uc-r.github.io/random_forests
+
+Gradient Boosting Machines. (n.d.). Retrieved October 22, 2020, from http://uc-r.github.io/2018/06/14/gbm-regression/
